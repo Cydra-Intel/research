@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cydra — Threat Research</title>
+<meta name="description" content="Cydra is a threat-research practice. We take live phishing kits apart — how they hide, how they steal, and what actually stops them — and publish the teardowns.">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="Cydra — Threat Research">
+<meta property="og:description" content="We take live phishing kits apart — how they hide, how they steal, and what actually stops them.">
+<meta property="og:url" content="https://cydra-intel.github.io/research/">
+<meta property="og:image" content="https://cydra-intel.github.io/research/og-cover.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="675">
+<meta name="twitter:card" content="summary_large_image">
+
+<meta name="theme-color" content="#0b0e14">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  /* Cydra identity: ink neutrals, one coral accent, IBM Plex. Dark branded hero band
+     over a theme-aware article feed. */
+  :root{
+    --bg:#f5f6f8; --surface:#ffffff; --fg:#15171d; --muted:#596070; --line:#e3e6ec;
+    --accent:#cf4133; --accent-soft:rgba(207,65,51,.10);
+    --band:#0b0e14; --band-2:#121a28; --band-fg:#f4f6fb; --band-mut:#93a0b8;
+    --maxw:60rem; color-scheme:light;
+  }
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
+    --bg:#0d0f14; --surface:#151921; --fg:#e8ebf1; --muted:#9aa3b2; --line:#252b35;
+    --accent:#ff6a5a; --accent-soft:rgba(255,106,90,.14);
+    color-scheme:dark;
+  }}
+  :root[data-theme="dark"]{
+    --bg:#0d0f14; --surface:#151921; --fg:#e8ebf1; --muted:#9aa3b2; --line:#252b35;
+    --accent:#ff6a5a; --accent-soft:rgba(255,106,90,.14);
+    color-scheme:dark;
+  }
+
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+    line-height:1.7; font-size:1.0625rem;
+  }
+  a{color:inherit}
+  .gut{
+    padding-left:max(20px,env(safe-area-inset-left,0px));
+    padding-right:max(20px,env(safe-area-inset-right,0px));
+  }
+  .sans{font-family:"IBM Plex Sans",system-ui,sans-serif}
+
+  .theme-toggle{
+    position:fixed; top:14px; right:14px; z-index:50;
+    width:2.3rem; height:2.3rem; border-radius:50%;
+    border:1px solid rgba(255,255,255,.18); background:rgba(255,255,255,.08); color:#f4f6fb;
+    font-size:1rem; cursor:pointer; line-height:1; display:flex; align-items:center; justify-content:center;
+    backdrop-filter:blur(6px);
+  }
+  .theme-toggle:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+  /* ---- branded hero band ---- */
+  .band{background:linear-gradient(160deg,var(--band),var(--band-2)); color:var(--band-fg)}
+  .band-inner{max-width:var(--maxw); margin:0 auto; padding-block:0 4.5rem}
+  nav.topnav{
+    display:flex; align-items:center; justify-content:space-between;
+    padding-block:1.4rem; font-family:"IBM Plex Sans",sans-serif;
+  }
+  .brand{display:flex; align-items:center; gap:.6rem; text-decoration:none; color:var(--band-fg);
+    font-weight:700; letter-spacing:.14em; font-size:1.02rem}
+  .brand svg{display:block}
+  .navlinks{display:flex; gap:1.4rem; font-size:.86rem; color:var(--band-mut)}
+  .navlinks a{text-decoration:none; color:var(--band-mut)}
+  .navlinks a:hover{color:var(--band-fg)}
+
+  .kicker{
+    font-family:"IBM Plex Sans",sans-serif; font-weight:600; font-size:.74rem;
+    letter-spacing:.16em; text-transform:uppercase; color:#ff7059;
+    display:flex; align-items:center; gap:.6rem; margin:2.6rem 0 1.1rem;
+  }
+  .kicker::before{content:""; width:1.8rem; height:2px; background:#ff7059; display:inline-block}
+  .hero-h{
+    font-family:"IBM Plex Sans",sans-serif; font-weight:700;
+    font-size:clamp(2.3rem,7vw,4rem); line-height:1.04; letter-spacing:-.025em;
+    margin:0; max-width:18ch; text-wrap:balance; color:var(--band-fg);
+  }
+  .hero-h .em{color:#ff5a47}
+  .hero-p{
+    font-family:"IBM Plex Sans",sans-serif; color:var(--band-mut);
+    font-size:clamp(1.05rem,2.2vw,1.22rem); line-height:1.6;
+    margin:1.3rem 0 0; max-width:46ch;
+  }
+
+  /* ---- article feed ---- */
+  main{max-width:var(--maxw); margin:0 auto; padding-block:3.5rem 2rem}
+  .feed-head{
+    font-family:"IBM Plex Sans",sans-serif; font-weight:600; font-size:.74rem;
+    letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
+    margin:0 0 1.5rem;
+  }
+  .card{
+    display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); gap:0;
+    background:var(--surface); border:1px solid var(--line); border-radius:16px;
+    overflow:hidden; text-decoration:none; color:inherit;
+    transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+  }
+  .card:hover{transform:translateY(-2px); box-shadow:0 16px 40px -24px rgba(0,0,0,.45); border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+  .card-thumb{min-width:0; background:#0b0e14; display:block}
+  .card-thumb svg{display:block; width:100%; height:100%; object-fit:cover}
+  .card-body{padding:1.9rem 2rem; display:flex; flex-direction:column; gap:.7rem; min-width:0}
+  .tagrow{display:flex; flex-wrap:wrap; gap:.5rem; align-items:center;
+    font-family:"IBM Plex Sans",sans-serif; font-size:.72rem; letter-spacing:.06em; text-transform:uppercase}
+  .tag{color:var(--accent); font-weight:600; background:var(--accent-soft); padding:.2rem .55rem; border-radius:999px}
+  .tag.muted{color:var(--muted); background:transparent; border:1px solid var(--line)}
+  .card-title{
+    font-family:"IBM Plex Sans",sans-serif; font-weight:700; letter-spacing:-.015em;
+    font-size:clamp(1.4rem,3vw,1.9rem); line-height:1.12; margin:0; text-wrap:balance;
+  }
+  .card-dek{color:var(--muted); font-size:1rem; margin:0}
+  .card-meta{
+    margin-top:auto; font-family:"IBM Plex Sans",sans-serif; font-size:.8rem; color:var(--muted);
+    display:flex; gap:.6rem; align-items:center; padding-top:.4rem;
+  }
+  .readmore{color:var(--accent); font-weight:600; font-family:"IBM Plex Sans",sans-serif; font-size:.9rem}
+
+  .ghost{
+    margin-top:1.1rem; border:1px dashed var(--line); border-radius:16px;
+    padding:1.4rem 1.7rem; color:var(--muted);
+    font-family:"IBM Plex Sans",sans-serif; font-size:.92rem;
+    display:flex; align-items:center; gap:.6rem;
+  }
+  .ghost .dot{width:.5rem; height:.5rem; border-radius:50%; background:var(--accent); flex:none}
+
+  footer{
+    max-width:var(--maxw); margin:0 auto; padding-block:2.5rem 3.5rem; margin-top:2rem;
+    border-top:1px solid var(--line);
+    font-family:"IBM Plex Sans",sans-serif; font-size:.82rem; color:var(--muted);
+    display:flex; flex-wrap:wrap; gap:.4rem .9rem; align-items:center;
+  }
+  footer b{color:var(--fg); font-weight:700; letter-spacing:.06em}
+
+  @media (max-width:640px){
+    .card{grid-template-columns:1fr}
+    .card-thumb{aspect-ratio:16/9}
+    .navlinks{display:none}
+  }
+</style>
+</head>
+<body>
+
+<button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle light or dark theme" title="Toggle theme">◐</button>
+
+<div class="band gut">
+  <div class="band-inner">
+    <nav class="topnav">
+      <a class="brand" href="./index.html" aria-label="Cydra home">
+        <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true">
+          <path d="M16 2 L28 9 V23 L16 30 L4 23 V9 Z" fill="none" stroke="#ff5a47" stroke-width="2" stroke-linejoin="round"/>
+          <circle cx="16" cy="16" r="3.2" fill="#ff5a47"/>
+          <path d="M16 12.8 V6 M18.6 17.6 L24 21 M13.4 17.6 L8 21" stroke="#ff5a47" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+        </svg>
+        CYDRA
+      </a>
+      <div class="navlinks">
+        <a href="#research">Research</a>
+        <a href="#about">About</a>
+      </div>
+    </nav>
+
+    <div class="kicker">Threat research</div>
+    <h1 class="hero-h">We take phishing <span class="em">apart.</span></h1>
+    <p class="hero-p">Cydra tears down live phishing kits — how they hide from scanners, how they steal credentials and sessions, and what actually stops them. Plain-language teardowns for the people who have to defend against this, published here as we find them.</p>
+  </div>
+</div>
+
+<main class="gut" id="research">
+  <p class="feed-head">Latest research</p>
+
+  <a class="card" href="articles/adversary-in-the-middle.html">
+    <span class="card-thumb" aria-hidden="true">
+      <svg viewBox="0 0 480 300" preserveAspectRatio="xMidYMid slice" style="font-family:'IBM Plex Sans',system-ui,sans-serif">
+        <defs>
+          <linearGradient id="tb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0a0d13"/><stop offset="1" stop-color="#121a28"/></linearGradient>
+          <radialGradient id="tg" cx="0.5" cy="0.55" r="0.5"><stop offset="0" stop-color="#ff5a47" stop-opacity="0.26"/><stop offset="1" stop-color="#ff5a47" stop-opacity="0"/></radialGradient>
+          <linearGradient id="td" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff7a63"/><stop offset="1" stop-color="#e23d2b"/></linearGradient>
+        </defs>
+        <rect x="0" y="0" width="480" height="300" fill="url(#tb)"/>
+        <circle cx="240" cy="150" r="120" fill="url(#tg)"/>
+        <text x="40" y="54" fill="#ff7059" font-size="12" letter-spacing="2.5" font-weight="600">ADVERSARY IN THE MIDDLE</text>
+        <line x1="92" y1="168" x2="212" y2="168" stroke="#46506a" stroke-width="2.5"/>
+        <line x1="268" y1="168" x2="388" y2="168" stroke="#46506a" stroke-width="2.5"/>
+        <circle cx="80" cy="168" r="16" fill="#141b27" stroke="#39445a" stroke-width="2"/>
+        <circle cx="80" cy="164" r="4" fill="#93a0b8"/><path d="M73,178 a7,7 0 0,1 14,0" fill="#93a0b8"/>
+        <circle cx="400" cy="168" r="16" fill="#141b27" stroke="#39445a" stroke-width="2"/>
+        <circle cx="400" cy="168" r="6" fill="none" stroke="#93a0b8" stroke-width="2"/><line x1="394" y1="168" x2="406" y2="168" stroke="#93a0b8" stroke-width="2"/>
+        <rect x="224" y="152" width="32" height="32" rx="6" transform="rotate(45 240 168)" fill="url(#td)"/>
+        <circle cx="240" cy="163" r="5" fill="#fff"/><path d="M232,180 a8,8 0 0,1 16,0 z" fill="#fff"/>
+        <line x1="240" y1="186" x2="240" y2="224" stroke="#ff5a47" stroke-width="2.5" stroke-dasharray="5 5"/>
+        <path d="M235,220 L240,230 L245,220 Z" fill="#ff5a47"/>
+        <text x="240" y="262" text-anchor="middle" fill="#93a0b8" font-size="12">session stolen live</text>
+      </svg>
+    </span>
+    <span class="card-body">
+      <span class="tagrow"><span class="tag">Phishing teardown</span><span class="tag muted">Featured</span></span>
+      <h2 class="card-title">The phishing page that loads the real login</h2>
+      <p class="card-dek">An adversary-in-the-middle kit doesn't fake your sign-in screen — it proxies the genuine one in real time and walks off with the session your password and MFA just created. A sanitized teardown of how it works and what stops it.</p>
+      <span class="card-meta"><span>Nov 2026</span><span>·</span><span>7 min read</span><span>·</span><span class="readmore">Read →</span></span>
+    </span>
+  </a>
+
+  <div class="ghost"><span class="dot"></span> More teardowns in progress — cloaking gates, credential relays, and the infrastructure behind them.</div>
+
+  <p id="about" style="font-family:'IBM Plex Sans',system-ui,sans-serif;color:var(--muted);font-size:.95rem;line-height:1.7;max-width:46ch;margin:3rem 0 0">
+    <strong style="color:var(--fg);font-weight:600">About Cydra.</strong> Independent threat research focused on phishing infrastructure and evasion. Everything we publish is sanitized — indicators, brands, and keys are withheld and shared through the proper channels first.
+  </p>
+</main>
+
+<footer class="gut">
+  <span><b>CYDRA</b> · Threat Research</span>
+  <span>·</span>
+  <span>© 2026</span>
+</footer>
+
+<script>
+  (function () {
+    var root = document.documentElement, KEY = "cydra-theme";
+    try { var saved = localStorage.getItem(KEY); if (saved === "dark" || saved === "light") root.setAttribute("data-theme", saved); } catch (e) {}
+    var btn = document.getElementById("themeToggle");
+    if (btn) btn.addEventListener("click", function () {
+      var cur = root.getAttribute("data-theme");
+      var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      var isDark = cur ? cur === "dark" : prefersDark;
+      var next = isDark ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+    });
+  })();
+</script>
+
+</body>
+</html>
